@@ -1,0 +1,2 @@
+include(FetchContent)
+set(FETCHCONTENT_UPDATES_DISCONNECTED ON)

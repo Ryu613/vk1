@@ -1,0 +1,15 @@
+Checks:              '
+  -*,
+  clang-analyzer-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  cppcoreguidelines-*,
+  google-*,
+  -modernize-use-trailing-return-type,
+  -modernize-use-nullptr,
+  -hicpp-use-nullptr'
+WarningsAsErrors:    ''
+HeaderFileExtensions:         ['hpp']
+ImplementationFileExtensions: ['cpp']
+HeaderFilterRegex:   ''
