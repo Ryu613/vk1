@@ -1,6 +1,7 @@
-Checks:              '
+Checks: '
   -*,
   clang-analyzer-*,
+  bugprone-*,
   modernize-*,
   performance-*,
   readability-*,
@@ -8,8 +9,12 @@ Checks:              '
   google-*,
   -modernize-use-trailing-return-type,
   -modernize-use-nullptr,
-  -hicpp-use-nullptr'
-WarningsAsErrors:    ''
-HeaderFileExtensions:         ['hpp']
+  -hicpp-use-nullptr,
+  -readability-uppercase-literal-suffix'
+WarningsAsErrors: ''
+HeaderFileExtensions: ['hpp']
 ImplementationFileExtensions: ['cpp']
-HeaderFilterRegex:   ''
+HeaderFilterRegex: ''
+CheckOptions:
+  - key: cppcoreguidelines-avoid-do-while.IgnoreMacros
+    value: 'true'

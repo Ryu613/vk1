@@ -1,1 +1,15 @@
-{}
+{
+  "dependencies": [
+    "fmt",
+    "glm",
+    {
+      "name": "sdl2",
+      "features": [
+        "vulkan"
+      ]
+    },
+    "vk-bootstrap",
+    "vulkan-memory-allocator",
+    "vulkan-utility-libraries"
+  ]
+}

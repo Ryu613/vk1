@@ -1,2 +1,10 @@
 include(FetchContent)
 set(FETCHCONTENT_UPDATES_DISCONNECTED ON)
+
+find_package(Vulkan REQUIRED)
+find_package(vk-bootstrap CONFIG REQUIRED)
+find_package(VulkanMemoryAllocator CONFIG REQUIRED)
+find_package(VulkanUtilityLibraries CONFIG REQUIRED)
+find_package(glm CONFIG REQUIRED)
+find_package(SDL2 CONFIG REQUIRED)
+find_package(fmt CONFIG REQUIRED)
