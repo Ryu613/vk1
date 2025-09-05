@@ -3,6 +3,14 @@
     "fmt",
     "glm",
     {
+      "name": "imgui",
+      "features": [
+        "vulkan-binding",
+        "sdl2-binding",
+        "sdl2-renderer-binding"
+      ]
+    },
+    {
       "name": "sdl2",
       "features": [
         "vulkan"
@@ -11,5 +19,11 @@
     "vk-bootstrap",
     "vulkan-memory-allocator",
     "vulkan-utility-libraries"
+  ],
+  "overrides": [
+    {
+      "name": "imgui",
+      "version": "1.91.8#2"
+    }
   ]
 }

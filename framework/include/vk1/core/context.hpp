@@ -13,7 +13,7 @@
 #include "vk1/core/descriptor.hpp"
 
 namespace vk1 {
-	
+
 constexpr unsigned int FRAME_OVERLAP = 2;
 
 struct DeletionQueue {
@@ -40,6 +40,20 @@ struct FrameData {
   VkFence renderFence{VK_NULL_HANDLE};
 
   DeletionQueue deletionQueue;
+};
+
+struct ComputePushConstants {
+  glm::vec4 data1;
+  glm::vec4 data2;
+  glm::vec4 data3;
+  glm::vec4 data4;
+};
+
+struct ComputeEffect {
+  const char* name;
+  VkPipeline pipeline;
+  VkPipelineLayout layout;
+  ComputePushConstants data;
 };
 
 class Context {
@@ -85,8 +99,11 @@ class Context {
     return frames[frameNumber % FRAME_OVERLAP];
   }
 
-  VkQueue graphicsQueue{VK_NULL_HANDLE}; 
+  VkQueue graphicsQueue{VK_NULL_HANDLE};
   uint32_t graphicsQueueFamily{};
+
+  std::vector<ComputeEffect> bgEffects;
+  int currentBgEffect{0};
 
   static Context& get();
 
@@ -119,5 +136,8 @@ class Context {
 
   void initPipelines();
   void initBackgroundPipelines();
+
+  void initImgui();
+  void drawImgui(VkCommandBuffer cmd, VkImageView targetImageView);
 };
 }  // namespace vk1

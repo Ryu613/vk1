@@ -14,6 +14,7 @@ target_link_libraries(vk1
 		Vulkan::UtilityHeaders
 		$<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
         $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
+		imgui::imgui
 )
 
 target_include_directories(vk1 PUBLIC include)

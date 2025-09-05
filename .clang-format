@@ -1,7 +1,7 @@
 # reference: https://clang.llvm.org/docs/ClangFormatStyleOptions.html
 BasedOnStyle: Google
 ColumnLimit: 110
-BinPackParameters: OnePerLine
+BinPackParameters: false
 BinPackArguments: false
 AllowShortFunctionsOnASingleLine: Empty
 SortIncludes: Never

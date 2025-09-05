@@ -7,6 +7,9 @@
 #include "VkBootstrap.h"
 #define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.h"
+#include "imgui.h"
+#include "imgui_impl_sdl2.h"
+#include "imgui_impl_vulkan.h"
 
 #include "vk1/common/vk_init.hpp"
 #include "vk1/common/vk_util.hpp"
@@ -47,6 +50,8 @@ void Context::init() {
   initDescriptors();
   initPipelines();
 
+  initImgui();
+
   initialized = true;
 }
 
@@ -82,20 +87,34 @@ void Context::cleanup() {
 }
 
 void Context::drawBackground(VkCommandBuffer cmd) {
-  VkClearColorValue clearValue;
+  // VkClearColorValue clearValue;
   //// blue color flash periodically
-  //float flash = std::abs(std::sin(static_cast<float>(frameNumber) / 120.0f));
-  //clearValue = {{0.0f, 0.0f, flash, 1.0f}};
+  // float flash = std::abs(std::sin(static_cast<float>(frameNumber) / 120.0f));
+  // clearValue = {{0.0f, 0.0f, flash, 1.0f}};
 
-  //VkImageSubresourceRange clearRange = init::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
-  //vkCmdClearColorImage(cmd, drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+  // VkImageSubresourceRange clearRange = init::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
+  // vkCmdClearColorImage(cmd, drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+
+  ComputeEffect& effect = bgEffects[currentBgEffect];
 
   // bind the gradient drawing compute pipeline
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, gradientPipeline);
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, effect.pipeline);
 
   // bind the descriptor set containing the draw image for the compute pipeline
   vkCmdBindDescriptorSets(
       cmd, VK_PIPELINE_BIND_POINT_COMPUTE, gradientPipelineLayout, 0, 1, &drawImageDescriptors, 0, nullptr);
+
+  // ComputePushConstants pc{
+  //     .data1 = glm::vec4(1, 0, 0, 1),
+  //     .data2 = glm::vec4(0, 0, 1, 1),
+  // };
+
+  vkCmdPushConstants(cmd,
+                     gradientPipelineLayout,
+                     VK_SHADER_STAGE_COMPUTE_BIT,
+                     0,
+                     sizeof(ComputePushConstants),
+                     &effect.data);
 
   // execute the compute pipeline dispatch. We are using 16x16 workgroup size so we need to divide by it
   vkCmdDispatch(cmd, std::ceil(drawExtent.width / 16.0), std::ceil(drawExtent.height / 16.0), 1);
@@ -125,8 +144,7 @@ void Context::draw() {
 
   VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
-  util::transition_image(
-      cmd, swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+  util::transition_image(cmd, drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
   drawBackground(cmd);
 
@@ -139,9 +157,17 @@ void Context::draw() {
   util::copy_image_to_image(
       cmd, drawImage.image, swapchainImages[swapchainImageIndex], drawExtent, swapchainExtent);
 
+  // set swapchain image layout to Attachment Optimal so we can draw it
   util::transition_image(cmd,
                          swapchainImages[swapchainImageIndex],
                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+  drawImgui(cmd, swapchainImageViews[swapchainImageIndex]);
+
+  util::transition_image(cmd,
+                         swapchainImages[swapchainImageIndex],
+                         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                          VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
   VK_CHECK(vkEndCommandBuffer(cmd));
@@ -190,12 +216,34 @@ void Context::run() {
           stopRendering = false;
         }
       }
+
+      ImGui_ImplSDL2_ProcessEvent(&sdlEvent);
     }
 
     if (stopRendering) {
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       continue;
     }
+
+    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplSDL2_NewFrame();
+    ImGui::NewFrame();
+
+    if (ImGui::Begin("background")) {
+      ComputeEffect& selected = bgEffects[currentBgEffect];
+
+      ImGui::Text("selected effect: ", selected.name);
+
+      ImGui::SliderInt("Effect Index", &currentBgEffect, 0, bgEffects.size() - 1);
+
+      ImGui::InputFloat4("data1", (float*)&selected.data.data1);
+      ImGui::InputFloat4("data2", (float*)&selected.data.data2);
+      ImGui::InputFloat4("data3", (float*)&selected.data.data3);
+      ImGui::InputFloat4("data4", (float*)&selected.data.data4);
+      ImGui::End();
+    }
+
+    ImGui::Render();
 
     draw();
   }
@@ -405,11 +453,24 @@ void Context::initBackgroundPipelines() {
   computeLayout.pSetLayouts = &drawImageDescriptorLayout;
   computeLayout.setLayoutCount = 1;
 
+  VkPushConstantRange pushConstant{};
+  pushConstant.offset = 0;
+  pushConstant.size = sizeof(ComputePushConstants);
+  pushConstant.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+  computeLayout.pPushConstantRanges = &pushConstant;
+  computeLayout.pushConstantRangeCount = 1;
+
   VK_CHECK(vkCreatePipelineLayout(device, &computeLayout, nullptr, &gradientPipelineLayout));
 
   // create pipeline
-  VkShaderModule computeDrawShader{};
-  if (!util::load_shader_module("shaders/gradient.comp.spv", device, &computeDrawShader)) {
+  VkShaderModule gradientShader{};
+  if (!util::load_shader_module("shaders/gradient_color.comp.spv", device, &gradientShader)) {
+    fmt::print("Error when building the compute shader \n");
+  }
+
+  VkShaderModule skyShader{};
+  if (!util::load_shader_module("shaders/sky.comp.spv", device, &skyShader)) {
     fmt::print("Error when building the compute shader \n");
   }
 
@@ -417,7 +478,7 @@ void Context::initBackgroundPipelines() {
   stageinfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
   stageinfo.pNext = nullptr;
   stageinfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-  stageinfo.module = computeDrawShader;
+  stageinfo.module = gradientShader;
   stageinfo.pName = "main";
 
   VkComputePipelineCreateInfo computePipelineCreateInfo{};
@@ -426,15 +487,115 @@ void Context::initBackgroundPipelines() {
   computePipelineCreateInfo.layout = gradientPipelineLayout;
   computePipelineCreateInfo.stage = stageinfo;
 
+  ComputeEffect gradient{};
+  gradient.layout = gradientPipelineLayout;
+  gradient.name = "gradient";
+  gradient.data = {};
+
+  gradient.data.data1 = glm::vec4(1, 0, 0, 1);
+  gradient.data.data2 = glm::vec4(0, 0, 1, 1);
+
   VK_CHECK(vkCreateComputePipelines(
-      device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &gradientPipeline));
+      device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &gradient.pipeline));
 
-  vkDestroyShaderModule(device, computeDrawShader, nullptr);
+  computePipelineCreateInfo.stage.module = skyShader;
 
-  mainDeletionQueue.pushFunction([&]() {
+  ComputeEffect sky{};
+  gradient.layout = gradientPipelineLayout;
+  gradient.name = "sky";
+  gradient.data = {};
+
+  gradient.data.data1 = glm::vec4(0.1, 0.2, 0.4, 0.97);
+
+  VK_CHECK(vkCreateComputePipelines(
+      device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &sky.pipeline));
+
+  bgEffects.push_back(gradient);
+  bgEffects.push_back(sky);
+
+  vkDestroyShaderModule(device, gradientShader, nullptr);
+  vkDestroyShaderModule(device, skyShader, nullptr);
+
+  mainDeletionQueue.pushFunction([=]() {
     vkDestroyPipelineLayout(device, gradientPipelineLayout, nullptr);
-    vkDestroyPipeline(device, gradientPipeline, nullptr);
+    vkDestroyPipeline(device, sky.pipeline, nullptr);
+    vkDestroyPipeline(device, gradient.pipeline, nullptr);
   });
+}
+
+void Context::initImgui() {
+  // 1: create descriptor pool for IMGUI
+  //  the size of the pool is very oversize, but it's copied from imgui demo
+  //  itself.
+  VkDescriptorPoolSize pool_sizes[] = {{VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
+                                       {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
+                                       {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000},
+                                       {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000},
+                                       {VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000},
+                                       {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000},
+                                       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000},
+                                       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000},
+                                       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000},
+                                       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000},
+                                       {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000}};
+
+  VkDescriptorPoolCreateInfo pool_info = {};
+  pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+  pool_info.maxSets = 1000;
+  pool_info.poolSizeCount = static_cast<uint32_t>(std::size(pool_sizes));
+  pool_info.pPoolSizes = pool_sizes;
+
+  VkDescriptorPool imguiPool{};
+  VK_CHECK(vkCreateDescriptorPool(device, &pool_info, nullptr, &imguiPool));
+
+  // 2: initialize imgui library
+
+  // this initializes the core structures of imgui
+  ImGui::CreateContext();
+
+  // this initializes imgui for SDL
+  ImGui_ImplSDL2_InitForVulkan(window);
+
+  // this initializes imgui for Vulkan
+  ImGui_ImplVulkan_InitInfo init_info = {};
+  init_info.Instance = instance;
+  init_info.PhysicalDevice = gpu;
+  init_info.Device = device;
+  init_info.Queue = graphicsQueue;
+  init_info.DescriptorPool = imguiPool;
+  init_info.MinImageCount = 3;
+  init_info.ImageCount = 3;
+  init_info.UseDynamicRendering = true;
+
+  // dynamic rendering parameters for imgui to use
+  init_info.PipelineRenderingCreateInfo = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
+  init_info.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
+  init_info.PipelineRenderingCreateInfo.pColorAttachmentFormats = &swapchainImageFormat;
+
+  init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+
+  ImGui_ImplVulkan_Init(&init_info);
+
+  ImGui_ImplVulkan_CreateFontsTexture();
+
+  // add the destroy the imgui created structures
+  mainDeletionQueue.pushFunction([=]() {
+    ImGui_ImplVulkan_Shutdown();
+    vkDestroyDescriptorPool(device, imguiPool, nullptr);
+  });
+}
+
+void Context::drawImgui(VkCommandBuffer cmd, VkImageView targetImageView) {
+  VkRenderingAttachmentInfo colorAttachment =
+      init::attachment_info(targetImageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+  VkRenderingInfo renderInfo = init::rendering_info(swapchainExtent, &colorAttachment, nullptr);
+
+  vkCmdBeginRendering(cmd, &renderInfo);
+
+  ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+
+  vkCmdEndRendering(cmd);
 }
 
 }  // namespace vk1
