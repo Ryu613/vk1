@@ -2,6 +2,6 @@
 BasedOnStyle: Google
 ColumnLimit: 110
 BinPackParameters: false
-BinPackArguments: false
+BinPackArguments: OnePerLine
 AllowShortFunctionsOnASingleLine: Empty
 SortIncludes: Never
