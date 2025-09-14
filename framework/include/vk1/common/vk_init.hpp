@@ -167,8 +167,8 @@ inline VkRenderingAttachmentInfo attachment_info(VkImageView view,
 }
 
 inline VkRenderingInfo rendering_info(VkExtent2D renderExtent,
-                               VkRenderingAttachmentInfo* colorAttachment,
-                               VkRenderingAttachmentInfo* depthAttachment) {
+                                      VkRenderingAttachmentInfo* colorAttachment,
+                                      VkRenderingAttachmentInfo* depthAttachment) {
   VkRenderingInfo renderInfo{};
   renderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
   renderInfo.pNext = nullptr;
@@ -181,5 +181,35 @@ inline VkRenderingInfo rendering_info(VkExtent2D renderExtent,
   renderInfo.pStencilAttachment = nullptr;
 
   return renderInfo;
+}
+
+inline VkPipelineShaderStageCreateInfo pipeline_shader_stage_create_info(VkShaderStageFlagBits stage,
+                                                                         VkShaderModule shaderModule,
+                                                                         const char* entry = "main") {
+  VkPipelineShaderStageCreateInfo info{};
+  info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  info.pNext = nullptr;
+
+  // shader stage
+  info.stage = stage;
+  // module containing the code for this shader stage
+  info.module = shaderModule;
+  // the entry point of the shader
+  info.pName = entry;
+  return info;
+}
+
+inline VkPipelineLayoutCreateInfo pipeline_layout_create_info() {
+  VkPipelineLayoutCreateInfo info{};
+  info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  info.pNext = nullptr;
+
+  // empty defaults
+  info.flags = 0;
+  info.setLayoutCount = 0;
+  info.pSetLayouts = nullptr;
+  info.pushConstantRangeCount = 0;
+  info.pPushConstantRanges = nullptr;
+  return info;
 }
 }  // namespace vk1::init

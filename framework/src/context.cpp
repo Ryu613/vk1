@@ -148,7 +148,13 @@ void Context::draw() {
 
   drawBackground(cmd);
 
+  util::transition_image(
+      cmd, drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+  drawGeometry(cmd);
+
   util::transition_image(cmd, drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
   util::transition_image(cmd,
                          swapchainImages[swapchainImageIndex],
                          VK_IMAGE_LAYOUT_UNDEFINED,
@@ -197,6 +203,36 @@ void Context::draw() {
   VK_CHECK(vkQueuePresentKHR(graphicsQueue, &presentInfo));
 
   frameNumber++;
+}
+
+void Context::drawGeometry(VkCommandBuffer cmd) {
+  VkRenderingAttachmentInfo colorAttachment =
+      init::attachment_info(drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+  VkRenderingInfo renderInfo = init::rendering_info(drawExtent, &colorAttachment, nullptr);
+  vkCmdBeginRendering(cmd, &renderInfo);
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipeline);
+
+  VkViewport viewport{
+      .x = 0,
+      .y = 0,
+      .width = static_cast<float>(drawExtent.width),
+      .height = static_cast<float>(drawExtent.height),
+      .minDepth = 0.0f,
+      .maxDepth = 1.0f,
+  };
+
+  vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+  VkRect2D scissor{
+      .offset = {0, 0},
+      .extent = {drawExtent.width, drawExtent.height},
+  };
+
+  vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+  vkCmdDraw(cmd, 3, 1, 0, 0);
+
+  vkCmdEndRendering(cmd);
 }
 
 void Context::run() {
@@ -443,6 +479,8 @@ void Context::initDescriptors() {
 
 void Context::initPipelines() {
   initBackgroundPipelines();
+
+  initTrianglePipeline();
 }
 
 void Context::initBackgroundPipelines() {
@@ -598,4 +636,113 @@ void Context::drawImgui(VkCommandBuffer cmd, VkImageView targetImageView) {
   vkCmdEndRendering(cmd);
 }
 
+void Context::initTrianglePipeline() {
+  VkShaderModule triangleFragShader{};
+  if (!util::load_shader_module("shaders/colored_triangle.frag.spv", device, &triangleFragShader)) {
+    fmt::print("Error when building the triangle fragment shader \n");
+  }
+  VkShaderModule triangleVertShader{};
+  if (!util::load_shader_module("shaders/colored_triangle.vert.spv", device, &triangleVertShader)) {
+    fmt::print("Error when building the triangle vertex shader \n");
+  }
+  VkPipelineLayoutCreateInfo pipelineLayoutInfo = init::pipeline_layout_create_info();
+  VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &trianglePipelineLayout));
+
+  Pipeline::Builder builder;
+  builder.pipelineLayout = trianglePipelineLayout;
+  builder.shaders(triangleVertShader, triangleFragShader);
+  builder.inputTopology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+  builder.polygonMode(VK_POLYGON_MODE_FILL);
+  builder.cullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
+  builder.multisamplingNone();
+  builder.disableBlending();
+  builder.disableDepthTest();
+  builder.colorAttachmentFormat(drawImage.imageFormat);
+  builder.depthFormat(VK_FORMAT_UNDEFINED);
+
+  trianglePipeline = builder.build(device);
+
+  vkDestroyShaderModule(device, triangleFragShader, nullptr);
+  vkDestroyShaderModule(device, triangleVertShader, nullptr);
+
+  mainDeletionQueue.pushFunction([&]() {
+    vkDestroyPipelineLayout(device, trianglePipelineLayout, nullptr);
+    vkDestroyPipeline(device, trianglePipeline, nullptr);
+  });
+}
+
+void Context::immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function) {}
+
+AllocatedBuffer Context::createBuffer(size_t allocSize,
+                                      VkBufferUsageFlags usage,
+                                      VmaMemoryUsage memoryUsage) const {
+  VkBufferCreateInfo bufferInfo{
+      .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+  };
+  bufferInfo.size = allocSize;
+  bufferInfo.usage = usage;
+
+  VmaAllocationCreateInfo vmaallocInfo{
+      .usage = memoryUsage,
+      .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT,
+  };
+  AllocatedBuffer newBuffer{};
+
+  VK_CHECK(vmaCreateBuffer(
+      allocator, &bufferInfo, &vmaallocInfo, &newBuffer.buffer, &newBuffer.allocation, &newBuffer.info));
+
+  return newBuffer;
+}
+
+void Context::destroyBuffer(const AllocatedBuffer& buffer) const {
+  vmaDestroyBuffer(allocator, buffer.buffer, buffer.allocation);
+}
+
+GPUMeshBuffers Context::uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertices) {
+  const size_t vertexBufferSize = vertices.size() * sizeof(Vertex);
+  const size_t indexBufferSize = indices.size() * sizeof(uint32_t);
+
+  GPUMeshBuffers newSurface{};
+
+  newSurface.vertexBuffer =
+      createBuffer(vertexBufferSize,
+                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                       VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                   VMA_MEMORY_USAGE_CPU_ONLY);
+  VkBufferDeviceAddressInfo deviceAddressInfo{
+      .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+      .buffer = newSurface.vertexBuffer.buffer,
+  };
+  newSurface.vertexBufferAddress = vkGetBufferDeviceAddress(device, &deviceAddressInfo);
+  newSurface.indexBuffer = createBuffer(indexBufferSize,
+                                        VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                        VMA_MEMORY_USAGE_GPU_ONLY);
+
+  AllocatedBuffer staging = createBuffer(
+      vertexBufferSize + indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+  void* data = staging.allocation->GetMappedData();
+
+  memcpy(data, vertices.data(), vertexBufferSize);
+  memcpy((char*)data + vertexBufferSize, indices.data(), indexBufferSize);
+
+  immediateSubmit([&](VkCommandBuffer cmd) {
+    VkBufferCopy vertexCopy{0};
+    vertexCopy.dstOffset = 0;
+    vertexCopy.srcOffset = 0;
+    vertexCopy.size = vertexBufferSize;
+
+    vkCmdCopyBuffer(cmd, staging.buffer, newSurface.vertexBuffer.buffer, 1, &vertexCopy);
+
+    VkBufferCopy indexCopy{0};
+    indexCopy.dstOffset = 0;
+    indexCopy.srcOffset = vertexBufferSize;
+    indexCopy.size = indexBufferSize;
+
+    vkCmdCopyBuffer(cmd, staging.buffer, newSurface.indexBuffer.buffer, 1, &indexCopy);
+  });
+
+  destroyBuffer(staging);
+
+  return newSurface;
+}
 }  // namespace vk1

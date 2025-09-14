@@ -5,6 +5,7 @@
 #include <array>
 #include <deque>
 #include <functional>
+#include <span>
 
 #include "SDL.h"
 #include "SDL_vulkan.h"
@@ -105,6 +106,9 @@ class Context {
   std::vector<ComputeEffect> bgEffects;
   int currentBgEffect{0};
 
+  VkPipelineLayout trianglePipelineLayout;
+  VkPipeline trianglePipeline;
+
   static Context& get();
 
   // initializes everything in the engine
@@ -118,6 +122,14 @@ class Context {
 
   // run main loop
   void run();
+
+  void immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function);
+
+  GPUMeshBuffers uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertices);
+
+  AllocatedBuffer createBuffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage) const;
+
+  void destroyBuffer(const AllocatedBuffer& buffer) const;
 
  private:
   inline static Context* loadedContext = nullptr;
@@ -139,5 +151,9 @@ class Context {
 
   void initImgui();
   void drawImgui(VkCommandBuffer cmd, VkImageView targetImageView);
+
+  void initTrianglePipeline();
+
+  void drawGeometry(VkCommandBuffer cmd);
 };
 }  // namespace vk1
