@@ -15,9 +15,10 @@ target_link_libraries(vk1
 		$<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
         $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
 		imgui::imgui
+		fastgltf::fastgltf
 )
 
-target_include_directories(vk1 PUBLIC include)
+target_include_directories(vk1 PUBLIC include ${Stb_INCLUDE_DIR})
 
 add_executable(test_vk1 test/main.cpp)
 

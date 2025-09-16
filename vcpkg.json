@@ -5,9 +5,9 @@
     {
       "name": "imgui",
       "features": [
-        "vulkan-binding",
         "sdl2-binding",
-        "sdl2-renderer-binding"
+        "sdl2-renderer-binding",
+        "vulkan-binding"
       ]
     },
     {
@@ -16,9 +16,11 @@
         "vulkan"
       ]
     },
+    "stb",
     "vk-bootstrap",
     "vulkan-memory-allocator",
-    "vulkan-utility-libraries"
+    "vulkan-utility-libraries",
+    "fastgltf"
   ],
   "overrides": [
     {

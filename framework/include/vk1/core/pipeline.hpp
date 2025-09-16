@@ -41,6 +41,8 @@ class Pipeline {
     void depthFormat(VkFormat format);
 
     void disableDepthTest();
+
+    void enableDepthTest(bool depthWriteEnable, VkCompareOp op);
   };
 };
 }  // namespace vk1

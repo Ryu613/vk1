@@ -11,6 +11,7 @@
 #include "SDL_vulkan.h"
 
 #include "vk1/common/vk_type.hpp"
+#include "vk1/common/vk_loader.hpp"
 #include "vk1/core/descriptor.hpp"
 
 namespace vk1 {
@@ -85,7 +86,13 @@ class Context {
 
   VmaAllocator allocator;
 
+  VkFence immFence;
+  VkCommandBuffer immCommandBuffer;
+  VkCommandPool immCommandPool;
+
   AllocatedImage drawImage;
+  AllocatedImage depthImage;
+
   VkExtent2D drawExtent;
 
   DescriptorAllocator globalDescriptorAllocator;
@@ -95,6 +102,11 @@ class Context {
 
   VkPipeline gradientPipeline;
   VkPipelineLayout gradientPipelineLayout;
+
+  VkPipelineLayout meshPipelineLayout;
+  VkPipeline meshPipeline;
+
+  GPUMeshBuffers rectangle;
 
   inline FrameData& getCurrentFrame() {
     return frames[frameNumber % FRAME_OVERLAP];
@@ -108,6 +120,8 @@ class Context {
 
   VkPipelineLayout trianglePipelineLayout;
   VkPipeline trianglePipeline;
+
+  std::vector<std::shared_ptr<MeshAsset>> testMeshes;
 
   static Context& get();
 
@@ -153,6 +167,10 @@ class Context {
   void drawImgui(VkCommandBuffer cmd, VkImageView targetImageView);
 
   void initTrianglePipeline();
+
+  void initMeshPipeline();
+
+  void initDefaultData();
 
   void drawGeometry(VkCommandBuffer cmd);
 };

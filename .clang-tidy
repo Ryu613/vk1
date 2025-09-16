@@ -10,7 +10,8 @@ Checks: '
   -modernize-use-trailing-return-type,
   -modernize-use-nullptr,
   -hicpp-use-nullptr,
-  -readability-uppercase-literal-suffix'
+  -readability-uppercase-literal-suffix
+  -readability-identifier-length'
 WarningsAsErrors: ''
 HeaderFileExtensions: ['hpp']
 ImplementationFileExtensions: ['cpp']
