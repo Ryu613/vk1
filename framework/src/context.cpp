@@ -255,25 +255,26 @@ void Context::drawGeometry(VkCommandBuffer cmd) {
 
   vkCmdDraw(cmd, 3, 1, 0, 0);
 
-  //vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipeline);
+  // vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipeline);
 
-  //glm::mat4 view = glm::translate(glm::vec3{0, 0, -5});
-  //glm::mat4 projection = glm::perspective(
-  //    glm::radians(70.0f), static_cast<float>(drawExtent.width) / drawExtent.height, 10000.0f, 0.1f);
-  //projection[1][1] *= -1;
+  // glm::mat4 view = glm::translate(glm::vec3{0, 0, -5});
+  // glm::mat4 projection = glm::perspective(
+  //     glm::radians(70.0f), static_cast<float>(drawExtent.width) / drawExtent.height, 10000.0f, 0.1f);
+  // projection[1][1] *= -1;
 
-  //GPUDrawPushConstants pushConstants{};
-  //pushConstants.worldMatrix = projection * view;
+  // GPUDrawPushConstants pushConstants{};
+  // pushConstants.worldMatrix = projection * view;
   //// pushConstants.vertexBuffer = rectangle.vertexBufferAddress;
-  //pushConstants.vertexBuffer = testMeshes[2]->meshBuffers.vertexBufferAddress;
+  // pushConstants.vertexBuffer = testMeshes[2]->meshBuffers.vertexBufferAddress;
 
-  //vkCmdPushConstants(
-  //    cmd, meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &pushConstants);
-  //vkCmdBindIndexBuffer(cmd, testMeshes[2]->meshBuffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+  // vkCmdPushConstants(
+  //     cmd, meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants),
+  //     &pushConstants);
+  // vkCmdBindIndexBuffer(cmd, testMeshes[2]->meshBuffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
-  //vkCmdDrawIndexed(cmd, testMeshes[2]->surfaces[0].count, 1, testMeshes[2]->surfaces[0].startIndex, 0, 0);
+  // vkCmdDrawIndexed(cmd, testMeshes[2]->surfaces[0].count, 1, testMeshes[2]->surfaces[0].startIndex, 0, 0);
 
-  //vkCmdEndRendering(cmd);
+  // vkCmdEndRendering(cmd);
 
   // allocate a new uniform buffer for the scene data
   AllocatedBuffer gpuSceneDataBuffer =
@@ -989,9 +990,9 @@ void Context::resizeSwapchain() {
 }
 
 AllocatedImage Context::createImage(VkExtent3D size,
-                                          VkFormat format,
-                                          VkImageUsageFlags usage,
-                                          bool mipmapped) {
+                                    VkFormat format,
+                                    VkImageUsageFlags usage,
+                                    bool mipmapped) {
   AllocatedImage newImage;
   newImage.imageFormat = format;
   newImage.imageExtent = size;
@@ -1023,5 +1024,49 @@ AllocatedImage Context::createImage(VkExtent3D size,
   VK_CHECK(vkCreateImageView(device, &view_info, nullptr, &newImage.imageView));
 
   return newImage;
+}
+
+AllocatedImage Context::createImage(
+    void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped) {
+  size_t data_size = size.depth * size.width * size.height * 4;
+  AllocatedBuffer uploadbuffer =
+      createBuffer(data_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+  memcpy(uploadbuffer.info.pMappedData, data, data_size);
+
+  AllocatedImage new_image = createImage(
+      size, format, usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, mipmapped);
+
+  immediateSubmit([&](VkCommandBuffer cmd) {
+    util::transition_image(
+        cmd, new_image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    VkBufferImageCopy copyRegion = {};
+    copyRegion.bufferOffset = 0;
+    copyRegion.bufferRowLength = 0;
+    copyRegion.bufferImageHeight = 0;
+
+    copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copyRegion.imageSubresource.mipLevel = 0;
+    copyRegion.imageSubresource.baseArrayLayer = 0;
+    copyRegion.imageSubresource.layerCount = 1;
+    copyRegion.imageExtent = size;
+
+    // copy the buffer into the image
+    vkCmdCopyBufferToImage(
+        cmd, uploadbuffer.buffer, new_image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+    util::transition_image(
+        cmd, new_image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  });
+
+  destroyBuffer(uploadbuffer);
+
+  return new_image;
+}
+
+void Context::destroyImage(const AllocatedImage& img) {
+  vkDestroyImageView(device, img.imageView, nullptr);
+  vmaDestroyImage(allocator, img.image, img.allocation);
 }
 }  // namespace vk1

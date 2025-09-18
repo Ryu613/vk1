@@ -127,6 +127,14 @@ class Context {
   GPUSceneData sceneData;
   VkDescriptorSetLayout gpuSceneDataDescriptorLayout;
 
+  AllocatedImage whiteImage;
+  AllocatedImage blackImage;
+  AllocatedImage greyImage;
+  AllocatedImage errorCheckerboardImage;
+
+  VkSampler defaultSamplerLinear;
+  VkSampler defaultSamplerNearest;
+
   inline FrameData& getCurrentFrame() {
     return frames[frameNumber % FRAME_OVERLAP];
   }
