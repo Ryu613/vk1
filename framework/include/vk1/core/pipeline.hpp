@@ -43,6 +43,10 @@ class Pipeline {
     void disableDepthTest();
 
     void enableDepthTest(bool depthWriteEnable, VkCompareOp op);
+
+    void enableBlendingAdditive();
+
+    void enableBlendingAlpha();
   };
 };
 }  // namespace vk1

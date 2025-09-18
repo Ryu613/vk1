@@ -31,7 +31,7 @@ void Context::init() {
   loadedContext = this;
   // init window
   SDL_Init(SDL_INIT_VIDEO);
-  auto windowFlags = static_cast<SDL_WindowFlags>(SDL_WINDOW_VULKAN);
+  auto windowFlags = static_cast<SDL_WindowFlags>(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
   window = SDL_CreateWindow("Vulkan Window",
                             SDL_WINDOWPOS_UNDEFINED,
                             SDL_WINDOWPOS_UNDEFINED,
@@ -133,11 +133,16 @@ void Context::draw() {
   VK_CHECK(vkWaitForFences(device, 1, &getCurrentFrame().renderFence, true, 1000000000));
 
   getCurrentFrame().deletionQueue.flush();
+  getCurrentFrame().frameDescriptors.clearPools(device);
 
   // request image from swapchain
   uint32_t swapchainImageIndex{};
-  VK_CHECK(vkAcquireNextImageKHR(
-      device, swapchain, 1000000000, getCurrentFrame().swapchainSemaphore, nullptr, &swapchainImageIndex));
+  VkResult e = vkAcquireNextImageKHR(
+      device, swapchain, 1000000000, getCurrentFrame().swapchainSemaphore, nullptr, &swapchainImageIndex);
+  if (e == VK_ERROR_OUT_OF_DATE_KHR) {
+    resizeRequested = true;
+    return;
+  }
 
   VK_CHECK(vkResetFences(device, 1, &getCurrentFrame().renderFence));
 
@@ -147,8 +152,8 @@ void Context::draw() {
 
   auto cmdBeginInfo = init::command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
-  drawExtent.width = drawImage.imageExtent.width;
-  drawExtent.height = drawImage.imageExtent.height;
+  drawExtent.width = std::min(swapchainExtent.width, drawImage.imageExtent.width) * renderScale;
+  drawExtent.height = std::min(swapchainExtent.height, drawImage.imageExtent.height) * renderScale;
 
   VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
@@ -211,7 +216,11 @@ void Context::draw() {
       .pImageIndices = &swapchainImageIndex,
   };
 
-  VK_CHECK(vkQueuePresentKHR(graphicsQueue, &presentInfo));
+  e = vkQueuePresentKHR(graphicsQueue, &presentInfo);
+  if (e == VK_ERROR_OUT_OF_DATE_KHR) {
+    resizeRequested = true;
+    return;
+  }
 
   frameNumber++;
 }
@@ -246,25 +255,45 @@ void Context::drawGeometry(VkCommandBuffer cmd) {
 
   vkCmdDraw(cmd, 3, 1, 0, 0);
 
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipeline);
+  //vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipeline);
 
-  glm::mat4 view = glm::translate(glm::vec3{0, 0, -5});
-  glm::mat4 projection = glm::perspective(
-      glm::radians(70.0f), static_cast<float>(drawExtent.width) / drawExtent.height, 10000.0f, 0.1f);
-  projection[1][1] *= -1;
+  //glm::mat4 view = glm::translate(glm::vec3{0, 0, -5});
+  //glm::mat4 projection = glm::perspective(
+  //    glm::radians(70.0f), static_cast<float>(drawExtent.width) / drawExtent.height, 10000.0f, 0.1f);
+  //projection[1][1] *= -1;
 
-  GPUDrawPushConstants pushConstants{};
-  pushConstants.worldMatrix = projection * view;
-  // pushConstants.vertexBuffer = rectangle.vertexBufferAddress;
-  pushConstants.vertexBuffer = testMeshes[2]->meshBuffers.vertexBufferAddress;
+  //GPUDrawPushConstants pushConstants{};
+  //pushConstants.worldMatrix = projection * view;
+  //// pushConstants.vertexBuffer = rectangle.vertexBufferAddress;
+  //pushConstants.vertexBuffer = testMeshes[2]->meshBuffers.vertexBufferAddress;
 
-  vkCmdPushConstants(
-      cmd, meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &pushConstants);
-  vkCmdBindIndexBuffer(cmd, testMeshes[2]->meshBuffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+  //vkCmdPushConstants(
+  //    cmd, meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &pushConstants);
+  //vkCmdBindIndexBuffer(cmd, testMeshes[2]->meshBuffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
-  vkCmdDrawIndexed(cmd, testMeshes[2]->surfaces[0].count, 1, testMeshes[2]->surfaces[0].startIndex, 0, 0);
+  //vkCmdDrawIndexed(cmd, testMeshes[2]->surfaces[0].count, 1, testMeshes[2]->surfaces[0].startIndex, 0, 0);
 
-  vkCmdEndRendering(cmd);
+  //vkCmdEndRendering(cmd);
+
+  // allocate a new uniform buffer for the scene data
+  AllocatedBuffer gpuSceneDataBuffer =
+      createBuffer(sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+  // add it to the deletion queue of this frame so it gets deleted once its been used
+  getCurrentFrame().deletionQueue.pushFunction([=, this]() { destroyBuffer(gpuSceneDataBuffer); });
+
+  // write the buffer
+  GPUSceneData* sceneUniformData = (GPUSceneData*)gpuSceneDataBuffer.allocation->GetMappedData();
+  *sceneUniformData = sceneData;
+
+  // create a descriptor set that binds that buffer and update it
+  VkDescriptorSet globalDescriptor =
+      getCurrentFrame().frameDescriptors.allocate(device, gpuSceneDataDescriptorLayout);
+
+  DescriptorWriter writer;
+  writer.writeBuffer(
+      0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+  writer.updateSet(device, globalDescriptor);
 }
 
 void Context::run() {
@@ -293,11 +322,16 @@ void Context::run() {
       continue;
     }
 
+    if (resizeRequested) {
+      resizeSwapchain();
+    }
+
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplSDL2_NewFrame();
     ImGui::NewFrame();
 
     if (ImGui::Begin("background")) {
+      ImGui::SliderFloat("Render Scale", &renderScale, 0.3f, 1.f);
       ComputeEffect& selected = bgEffects[currentBgEffect];
 
       ImGui::Text("selected effect: ", selected.name);
@@ -515,30 +549,58 @@ void Context::initDescriptors() {
     drawImageDescriptorLayout = builder.build(device, VK_SHADER_STAGE_COMPUTE_BIT);
   }
 
+  {
+    DescriptorLayoutBuilder builder;
+    builder.addBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+    gpuSceneDataDescriptorLayout =
+        builder.build(device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
+  }
+
   drawImageDescriptors = globalDescriptorAllocator.allocate(device, drawImageDescriptorLayout);
 
-  VkDescriptorImageInfo imgInfo{
-      .imageView = drawImage.imageView,
-      .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
-  };
+  // VkDescriptorImageInfo imgInfo{
+  //     .imageView = drawImage.imageView,
+  //     .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+  // };
 
-  VkWriteDescriptorSet drawImageWrite = {};
-  drawImageWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  drawImageWrite.pNext = nullptr;
+  // VkWriteDescriptorSet drawImageWrite = {};
+  // drawImageWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  // drawImageWrite.pNext = nullptr;
 
-  drawImageWrite.dstBinding = 0;
-  drawImageWrite.dstSet = drawImageDescriptors;
-  drawImageWrite.descriptorCount = 1;
-  drawImageWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-  drawImageWrite.pImageInfo = &imgInfo;
+  // drawImageWrite.dstBinding = 0;
+  // drawImageWrite.dstSet = drawImageDescriptors;
+  // drawImageWrite.descriptorCount = 1;
+  // drawImageWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+  // drawImageWrite.pImageInfo = &imgInfo;
 
-  vkUpdateDescriptorSets(device, 1, &drawImageWrite, 0, nullptr);
+  // vkUpdateDescriptorSets(device, 1, &drawImageWrite, 0, nullptr);
+
+  DescriptorWriter writer;
+  writer.writeImage(
+      0, drawImage.imageView, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+
+  writer.updateSet(device, drawImageDescriptors);
 
   mainDeletionQueue.pushFunction([&]() {
     globalDescriptorAllocator.destroyPool(device);
 
     vkDestroyDescriptorSetLayout(device, drawImageDescriptorLayout, nullptr);
   });
+
+  for (int i = 0; i < FRAME_OVERLAP; i++) {
+    // create a descriptor pool
+    std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> frameSizes = {
+        {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 3},
+        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3},
+        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3},
+        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4},
+    };
+
+    frames[i].frameDescriptors = DescriptorAllocatorGrowable{};
+    frames[i].frameDescriptors.init(device, 1000, frameSizes);
+
+    mainDeletionQueue.pushFunction([&, i]() { frames[i].frameDescriptors.destroyPools(device); });
+  }
 }
 
 void Context::initPipelines() {
@@ -764,7 +826,8 @@ void Context::initMeshPipeline() {
   builder.polygonMode(VK_POLYGON_MODE_FILL);
   builder.cullMode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
   builder.multisamplingNone();
-  builder.disableBlending();
+  // builder.disableBlending();
+  builder.enableBlendingAdditive();
   builder.enableDepthTest(true, VK_COMPARE_OP_GREATER_OR_EQUAL);
   builder.colorAttachmentFormat(drawImage.imageFormat);
   builder.depthFormat(depthImage.imageFormat);
@@ -908,5 +971,57 @@ GPUMeshBuffers Context::uploadMesh(std::span<uint32_t> indices, std::span<Vertex
   destroyBuffer(staging);
 
   return newSurface;
+}
+
+void Context::resizeSwapchain() {
+  vkDeviceWaitIdle(device);
+
+  destroySwapchain();
+
+  int w, h;
+  SDL_GetWindowSize(window, &w, &h);
+  windowExtent.width = w;
+  windowExtent.height = h;
+
+  createSwapchain(windowExtent);
+
+  resizeRequested = false;
+}
+
+AllocatedImage Context::createImage(VkExtent3D size,
+                                          VkFormat format,
+                                          VkImageUsageFlags usage,
+                                          bool mipmapped) {
+  AllocatedImage newImage;
+  newImage.imageFormat = format;
+  newImage.imageExtent = size;
+
+  VkImageCreateInfo img_info = init::image_create_info(format, usage, size);
+  if (mipmapped) {
+    img_info.mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(size.width, size.height)))) + 1;
+  }
+
+  // always allocate images on dedicated GPU memory
+  VmaAllocationCreateInfo allocinfo = {};
+  allocinfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+  allocinfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+  // allocate and create the image
+  VK_CHECK(vmaCreateImage(allocator, &img_info, &allocinfo, &newImage.image, &newImage.allocation, nullptr));
+
+  // if the format is a depth format, we will need to have it use the correct
+  // aspect flag
+  VkImageAspectFlags aspectFlag = VK_IMAGE_ASPECT_COLOR_BIT;
+  if (format == VK_FORMAT_D32_SFLOAT) {
+    aspectFlag = VK_IMAGE_ASPECT_DEPTH_BIT;
+  }
+
+  // build a image-view for the image
+  VkImageViewCreateInfo view_info = init::imageview_create_info(format, newImage.image, aspectFlag);
+  view_info.subresourceRange.levelCount = img_info.mipLevels;
+
+  VK_CHECK(vkCreateImageView(device, &view_info, nullptr, &newImage.imageView));
+
+  return newImage;
 }
 }  // namespace vk1

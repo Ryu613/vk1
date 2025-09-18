@@ -42,6 +42,8 @@ struct FrameData {
   VkFence renderFence{VK_NULL_HANDLE};
 
   DeletionQueue deletionQueue;
+
+  DescriptorAllocatorGrowable frameDescriptors;
 };
 
 struct ComputePushConstants {
@@ -94,6 +96,7 @@ class Context {
   AllocatedImage depthImage;
 
   VkExtent2D drawExtent;
+  float renderScale = 1.0f;
 
   DescriptorAllocator globalDescriptorAllocator;
 
@@ -108,10 +111,6 @@ class Context {
 
   GPUMeshBuffers rectangle;
 
-  inline FrameData& getCurrentFrame() {
-    return frames[frameNumber % FRAME_OVERLAP];
-  }
-
   VkQueue graphicsQueue{VK_NULL_HANDLE};
   uint32_t graphicsQueueFamily{};
 
@@ -122,6 +121,15 @@ class Context {
   VkPipeline trianglePipeline;
 
   std::vector<std::shared_ptr<MeshAsset>> testMeshes;
+
+  bool resizeRequested{false};
+
+  GPUSceneData sceneData;
+  VkDescriptorSetLayout gpuSceneDataDescriptorLayout;
+
+  inline FrameData& getCurrentFrame() {
+    return frames[frameNumber % FRAME_OVERLAP];
+  }
 
   static Context& get();
 
@@ -144,6 +152,14 @@ class Context {
   AllocatedBuffer createBuffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage) const;
 
   void destroyBuffer(const AllocatedBuffer& buffer) const;
+
+  AllocatedImage createImage(VkExtent3D size,
+                             VkFormat format,
+                             VkImageUsageFlags usage,
+                             bool mipmapped = false);
+  AllocatedImage createImage(
+      void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
+  void destroyImage(const AllocatedImage& img);
 
  private:
   inline static Context* loadedContext = nullptr;
@@ -173,5 +189,7 @@ class Context {
   void initDefaultData();
 
   void drawGeometry(VkCommandBuffer cmd);
+
+  void resizeSwapchain();
 };
 }  // namespace vk1
