@@ -227,7 +227,7 @@ void Context::draw() {
 
 void Context::drawGeometry(VkCommandBuffer cmd) {
   VkRenderingAttachmentInfo colorAttachment =
-      init::attachment_info(drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_GENERAL);
+      init::attachment_info(drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
   VkRenderingAttachmentInfo depthAttachment =
       init::depth_attachment_info(depthImage.imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
@@ -255,46 +255,59 @@ void Context::drawGeometry(VkCommandBuffer cmd) {
 
   vkCmdDraw(cmd, 3, 1, 0, 0);
 
-  // vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipeline);
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipeline);
 
-  // glm::mat4 view = glm::translate(glm::vec3{0, 0, -5});
-  // glm::mat4 projection = glm::perspective(
-  //     glm::radians(70.0f), static_cast<float>(drawExtent.width) / drawExtent.height, 10000.0f, 0.1f);
-  // projection[1][1] *= -1;
+  VkDescriptorSet imageSet = getCurrentFrame().frameDescriptors.allocate(device, singleImageDescriptorLayout);
+  {
+    DescriptorWriter writer;
+    writer.writeImage(0,
+                      errorCheckerboardImage.imageView,
+                      defaultSamplerNearest,
+                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    writer.updateSet(device, imageSet);
+  }
 
-  // GPUDrawPushConstants pushConstants{};
-  // pushConstants.worldMatrix = projection * view;
-  //// pushConstants.vertexBuffer = rectangle.vertexBufferAddress;
-  // pushConstants.vertexBuffer = testMeshes[2]->meshBuffers.vertexBufferAddress;
+  vkCmdBindDescriptorSets(
+      cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipelineLayout, 0, 1, &imageSet, 0, nullptr);
 
-  // vkCmdPushConstants(
-  //     cmd, meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants),
-  //     &pushConstants);
-  // vkCmdBindIndexBuffer(cmd, testMeshes[2]->meshBuffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+  glm::mat4 view = glm::translate(glm::vec3{0, 0, -5});
+  glm::mat4 projection = glm::perspective(
+      glm::radians(70.0f), static_cast<float>(drawExtent.width) / drawExtent.height, 10000.0f, 0.1f);
+  projection[1][1] *= -1;
 
-  // vkCmdDrawIndexed(cmd, testMeshes[2]->surfaces[0].count, 1, testMeshes[2]->surfaces[0].startIndex, 0, 0);
+  GPUDrawPushConstants pushConstants{} ;
+  pushConstants.worldMatrix = projection * view;
+  // pushConstants.vertexBuffer = rectangle.vertexBufferAddress;
+  pushConstants.vertexBuffer = testMeshes[2]->meshBuffers.vertexBufferAddress;
 
-  // vkCmdEndRendering(cmd);
+  vkCmdPushConstants(
+      cmd, meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &pushConstants);
+  vkCmdBindIndexBuffer(cmd, testMeshes[2]->meshBuffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
-  // allocate a new uniform buffer for the scene data
-  AllocatedBuffer gpuSceneDataBuffer =
-      createBuffer(sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+  vkCmdDrawIndexed(cmd, testMeshes[2]->surfaces[0].count, 1, testMeshes[2]->surfaces[0].startIndex, 0, 0);
 
-  // add it to the deletion queue of this frame so it gets deleted once its been used
-  getCurrentFrame().deletionQueue.pushFunction([=, this]() { destroyBuffer(gpuSceneDataBuffer); });
+  vkCmdEndRendering(cmd);
 
-  // write the buffer
-  GPUSceneData* sceneUniformData = (GPUSceneData*)gpuSceneDataBuffer.allocation->GetMappedData();
-  *sceneUniformData = sceneData;
+  //// allocate a new uniform buffer for the scene data
+  // AllocatedBuffer gpuSceneDataBuffer =
+  //     createBuffer(sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
-  // create a descriptor set that binds that buffer and update it
-  VkDescriptorSet globalDescriptor =
-      getCurrentFrame().frameDescriptors.allocate(device, gpuSceneDataDescriptorLayout);
+  //// add it to the deletion queue of this frame so it gets deleted once its been used
+  // getCurrentFrame().deletionQueue.pushFunction([=, this]() { destroyBuffer(gpuSceneDataBuffer); });
 
-  DescriptorWriter writer;
-  writer.writeBuffer(
-      0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-  writer.updateSet(device, globalDescriptor);
+  //// write the buffer
+  // GPUSceneData* sceneUniformData = (GPUSceneData*)gpuSceneDataBuffer.allocation->GetMappedData();
+  //*sceneUniformData = sceneData;
+
+  //// create a descriptor set that binds that buffer and update it
+  // VkDescriptorSet globalDescriptor =
+  //     getCurrentFrame().frameDescriptors.allocate(device, gpuSceneDataDescriptorLayout);
+
+  // DescriptorWriter writer;
+  // writer.writeBuffer(
+  //     0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+  // writer.updateSet(device, globalDescriptor);
 }
 
 void Context::run() {
@@ -557,6 +570,12 @@ void Context::initDescriptors() {
         builder.build(device, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT);
   }
 
+  {
+    DescriptorLayoutBuilder builder;
+    builder.addBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+    singleImageDescriptorLayout = builder.build(device, VK_SHADER_STAGE_FRAGMENT_BIT);
+  }
+
   drawImageDescriptors = globalDescriptorAllocator.allocate(device, drawImageDescriptorLayout);
 
   // VkDescriptorImageInfo imgInfo{
@@ -802,7 +821,7 @@ void Context::initTrianglePipeline() {
 
 void Context::initMeshPipeline() {
   VkShaderModule triangleFragShader{};
-  if (!util::load_shader_module("shaders/colored_triangle.frag.spv", device, &triangleFragShader)) {
+  if (!util::load_shader_module("shaders/tex_image.frag.spv", device, &triangleFragShader)) {
     fmt::print("Error when building the triangle fragment shader \n");
   }
   VkShaderModule triangleVertShader{};
@@ -818,6 +837,8 @@ void Context::initMeshPipeline() {
   VkPipelineLayoutCreateInfo pipelineLayoutInfo = init::pipeline_layout_create_info();
   pipelineLayoutInfo.pPushConstantRanges = &bufferRange;
   pipelineLayoutInfo.pushConstantRangeCount = 1;
+  pipelineLayoutInfo.pSetLayouts = &singleImageDescriptorLayout;
+  pipelineLayoutInfo.setLayoutCount = 1;
   VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &meshPipelineLayout));
 
   Pipeline::Builder builder;
@@ -873,6 +894,52 @@ void Context::initDefaultData() {
   mainDeletionQueue.pushFunction([&]() {
     destroyBuffer(rectangle.indexBuffer);
     destroyBuffer(rectangle.vertexBuffer);
+  });
+
+  // clamp vector to unsigned int range(clamp[0,1] * 255)
+  // 4 means rgba(vec4), 8 means 8bit(128(unsigned int range))
+  // white rgba value
+  uint32_t white = glm::packUnorm4x8(glm::vec4(1, 1, 1, 1));
+  whiteImage =
+      createImage((void*)&white, VkExtent3D{1, 1, 1}, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT);
+  uint32_t grey = glm::packUnorm4x8(glm::vec4(0.66f, 0.66f, 0.66f, 1));
+  greyImage =
+      createImage((void*)&grey, VkExtent3D{1, 1, 1}, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT);
+  uint32_t black = glm::packUnorm4x8(glm::vec4(0, 0, 0, 0));
+  blackImage =
+      createImage((void*)&black, VkExtent3D{1, 1, 1}, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT);
+
+  // checkerboard image
+  uint32_t magenta = glm::packUnorm4x8(glm::vec4(1, 0, 1, 1));
+  std::array<uint32_t, 16 * 16> pixels;  // for 16x16 checkerboard texture
+  for (int x = 0; x < 16; x++) {
+    for (int y = 0; y < 16; y++) {
+      pixels[y * 16 + x] = ((x % 2) ^ (y % 2)) ? magenta : black;
+    }
+  }
+  errorCheckerboardImage =
+      createImage(pixels.data(), VkExtent3D{16, 16, 1}, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT);
+  VkSamplerCreateInfo sampl{
+      .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+  };
+  sampl.magFilter = VK_FILTER_NEAREST;
+  sampl.minFilter = VK_FILTER_NEAREST;
+
+  vkCreateSampler(device, &sampl, nullptr, &defaultSamplerNearest);
+
+  sampl.magFilter = VK_FILTER_LINEAR;
+  sampl.minFilter = VK_FILTER_LINEAR;
+
+  vkCreateSampler(device, &sampl, nullptr, &defaultSamplerLinear);
+
+  mainDeletionQueue.pushFunction([&] {
+    vkDestroySampler(device, defaultSamplerNearest, nullptr);
+    vkDestroySampler(device, defaultSamplerLinear, nullptr);
+
+    destroyImage(whiteImage);
+    destroyImage(greyImage);
+    destroyImage(blackImage);
+    destroyImage(errorCheckerboardImage);
   });
 }
 

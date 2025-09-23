@@ -135,6 +135,8 @@ class Context {
   VkSampler defaultSamplerLinear;
   VkSampler defaultSamplerNearest;
 
+  VkDescriptorSetLayout singleImageDescriptorLayout;
+
   inline FrameData& getCurrentFrame() {
     return frames[frameNumber % FRAME_OVERLAP];
   }
