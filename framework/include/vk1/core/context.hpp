@@ -60,6 +60,49 @@ struct ComputeEffect {
   ComputePushConstants data;
 };
 
+// use for VkCmdDrawIndexed call
+struct RenderObject {
+  uint32_t indexCount;
+  uint32_t firstIndex;
+  VkBuffer indexBuffer;
+  MaterialInstance* material;
+  glm::mat4 transform;
+  VkDeviceAddress vertexBufferAddress;
+};
+
+struct GltfMetallicRoughness {
+  MaterialPipeline opaquePipeline;
+  MaterialPipeline transparentPipeline;
+
+  VkDescriptorSetLayout materialLayout;
+
+  struct MaterialConstants {
+    glm::vec4 colorFactors;
+    glm::vec4 metalRoughFactors;
+    // padding
+    glm::vec4 extra[14];
+  };
+
+  struct MaterialResources {
+    AllocatedImage colorImage;
+    VkSampler colorSampler;
+    AllocatedImage metalRoughImage;
+    VkSampler metalRoughSampler;
+    VkBuffer dataBuffer;
+    uint32_t dataBufferOffset;
+  };
+
+  DescriptorWriter writer;
+
+  void buildPipeline(Context* ctx);
+  void clearResources(VkDevice device);
+
+  MaterialInstance writeMaterial(VkDevice device,
+                                 MaterialPass pass,
+                                 const MaterialResources& resources,
+                                 DescriptorAllocatorGrowable& descriptorAllocator);
+};
+
 class Context {
  public:
   bool initialized{false};
@@ -98,7 +141,7 @@ class Context {
   VkExtent2D drawExtent;
   float renderScale = 1.0f;
 
-  DescriptorAllocator globalDescriptorAllocator;
+  DescriptorAllocatorGrowable globalDescriptorAllocator;
 
   VkDescriptorSet drawImageDescriptors;
   VkDescriptorSetLayout drawImageDescriptorLayout;
@@ -136,6 +179,9 @@ class Context {
   VkSampler defaultSamplerNearest;
 
   VkDescriptorSetLayout singleImageDescriptorLayout;
+
+  MaterialInstance defaultData;
+  GltfMetallicRoughness metalRoughMaterial;
 
   inline FrameData& getCurrentFrame() {
     return frames[frameNumber % FRAME_OVERLAP];
