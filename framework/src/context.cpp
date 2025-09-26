@@ -129,6 +129,7 @@ void Context::drawBackground(VkCommandBuffer cmd) {
 }
 
 void Context::draw() {
+  updateScene();
   // wait gpu finished last frame rendering, timeout of 1 sec
   VK_CHECK(vkWaitForFences(device, 1, &getCurrentFrame().renderFence, true, 1000000000));
 
@@ -255,59 +256,95 @@ void Context::drawGeometry(VkCommandBuffer cmd) {
 
   vkCmdDraw(cmd, 3, 1, 0, 0);
 
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipeline);
+  // vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipeline);
 
-  VkDescriptorSet imageSet = getCurrentFrame().frameDescriptors.allocate(device, singleImageDescriptorLayout);
-  {
-    DescriptorWriter writer;
-    writer.writeImage(0,
-                      errorCheckerboardImage.imageView,
-                      defaultSamplerNearest,
-                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-    writer.updateSet(device, imageSet);
+  // VkDescriptorSet imageSet = getCurrentFrame().frameDescriptors.allocate(device,
+  // singleImageDescriptorLayout);
+  //{
+  //   DescriptorWriter writer;
+  //   writer.writeImage(0,
+  //                     errorCheckerboardImage.imageView,
+  //                     defaultSamplerNearest,
+  //                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+  //                     VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+  //   writer.updateSet(device, imageSet);
+  // }
+
+  // vkCmdBindDescriptorSets(
+  //     cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipelineLayout, 0, 1, &imageSet, 0, nullptr);
+
+  // glm::mat4 view = glm::translate(glm::vec3{0, 0, -5});
+  // glm::mat4 projection = glm::perspective(
+  //     glm::radians(70.0f), static_cast<float>(drawExtent.width) / drawExtent.height, 10000.0f, 0.1f);
+  // projection[1][1] *= -1;
+
+  // GPUDrawPushConstants pushConstants{};
+  // pushConstants.worldMatrix = projection * view;
+  //// pushConstants.vertexBuffer = rectangle.vertexBufferAddress;
+  // pushConstants.vertexBuffer = testMeshes[2]->meshBuffers.vertexBufferAddress;
+
+  // vkCmdPushConstants(
+  //     cmd, meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants),
+  //     &pushConstants);
+  // vkCmdBindIndexBuffer(cmd, testMeshes[2]->meshBuffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+
+  // vkCmdDrawIndexed(cmd, testMeshes[2]->surfaces[0].count, 1, testMeshes[2]->surfaces[0].startIndex, 0, 0);
+
+  // vkCmdEndRendering(cmd);
+
+  // allocate a new uniform buffer for the scene data
+  AllocatedBuffer gpuSceneDataBuffer =
+      createBuffer(sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+  // add it to the deletion queue of this frame so it gets deleted once its been used
+  getCurrentFrame().deletionQueue.pushFunction([=, this]() { destroyBuffer(gpuSceneDataBuffer); });
+
+  // write the buffer
+  GPUSceneData* sceneUniformData = (GPUSceneData*)gpuSceneDataBuffer.allocation->GetMappedData();
+  *sceneUniformData = sceneData;
+
+  // create a descriptor set that binds that buffer and update it
+  VkDescriptorSet globalDescriptor =
+      getCurrentFrame().frameDescriptors.allocate(device, gpuSceneDataDescriptorLayout);
+
+  DescriptorWriter writer;
+  writer.writeBuffer(
+      0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+  writer.updateSet(device, globalDescriptor);
+
+  for (const RenderObject& draw : mainDrawContext.opaqueSurfaces) {
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, draw.material->pipeline->pipeline);
+    vkCmdBindDescriptorSets(cmd,
+                            VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            draw.material->pipeline->layout,
+                            0,
+                            1,
+                            &globalDescriptor,
+                            0,
+                            nullptr);
+    vkCmdBindDescriptorSets(cmd,
+                            VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            draw.material->pipeline->layout,
+                            1,
+                            1,
+                            &draw.material->materialSet,
+                            0,
+                            nullptr);
+    vkCmdBindIndexBuffer(cmd, draw.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+
+    GPUDrawPushConstants pushConstants{};
+    pushConstants.vertexBuffer = draw.vertexBufferAddress;
+    pushConstants.worldMatrix = draw.transform;
+    vkCmdPushConstants(cmd,
+                       draw.material->pipeline->layout,
+                       VK_SHADER_STAGE_VERTEX_BIT,
+                       0,
+                       sizeof(GPUDrawPushConstants),
+                       &pushConstants);
+    vkCmdDrawIndexed(cmd, draw.indexCount, 1, draw.firstIndex, 0, 0);
   }
 
-  vkCmdBindDescriptorSets(
-      cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipelineLayout, 0, 1, &imageSet, 0, nullptr);
-
-  glm::mat4 view = glm::translate(glm::vec3{0, 0, -5});
-  glm::mat4 projection = glm::perspective(
-      glm::radians(70.0f), static_cast<float>(drawExtent.width) / drawExtent.height, 10000.0f, 0.1f);
-  projection[1][1] *= -1;
-
-  GPUDrawPushConstants pushConstants{};
-  pushConstants.worldMatrix = projection * view;
-  // pushConstants.vertexBuffer = rectangle.vertexBufferAddress;
-  pushConstants.vertexBuffer = testMeshes[2]->meshBuffers.vertexBufferAddress;
-
-  vkCmdPushConstants(
-      cmd, meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &pushConstants);
-  vkCmdBindIndexBuffer(cmd, testMeshes[2]->meshBuffers.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-
-  vkCmdDrawIndexed(cmd, testMeshes[2]->surfaces[0].count, 1, testMeshes[2]->surfaces[0].startIndex, 0, 0);
-
   vkCmdEndRendering(cmd);
-
-  //// allocate a new uniform buffer for the scene data
-  // AllocatedBuffer gpuSceneDataBuffer =
-  //     createBuffer(sizeof(GPUSceneData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-
-  //// add it to the deletion queue of this frame so it gets deleted once its been used
-  // getCurrentFrame().deletionQueue.pushFunction([=, this]() { destroyBuffer(gpuSceneDataBuffer); });
-
-  //// write the buffer
-  // GPUSceneData* sceneUniformData = (GPUSceneData*)gpuSceneDataBuffer.allocation->GetMappedData();
-  //*sceneUniformData = sceneData;
-
-  //// create a descriptor set that binds that buffer and update it
-  // VkDescriptorSet globalDescriptor =
-  //     getCurrentFrame().frameDescriptors.allocate(device, gpuSceneDataDescriptorLayout);
-
-  // DescriptorWriter writer;
-  // writer.writeBuffer(
-  //     0, gpuSceneDataBuffer.buffer, sizeof(GPUSceneData), 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-  // writer.updateSet(device, globalDescriptor);
 }
 
 void Context::run() {
@@ -891,35 +928,11 @@ void Context::initDefaultData() {
 
   rectangle = uploadMesh(rectIndices, rectVertices);
 
-  testMeshes = loadGltfMeshes(this, "assets/basicmesh.glb").value();
-
-  GltfMetallicRoughness::MaterialResources materialResources;
-  // default material textures
-  materialResources.colorImage = whiteImage;
-  materialResources.colorSampler = defaultSamplerLinear;
-  materialResources.metalRoughImage = whiteImage;
-  materialResources.metalRoughSampler = defaultSamplerLinear;
-
-  AllocatedBuffer materialConstants = createBuffer(sizeof(GltfMetallicRoughness::MaterialConstants),
-                                                   VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                                                   VMA_MEMORY_USAGE_CPU_TO_GPU);
-
-  auto* sceneUniformData =
-      (GltfMetallicRoughness::MaterialConstants*)materialConstants.allocation->GetMappedData();
-  sceneUniformData->colorFactors = glm::vec4{1, 1, 1, 1};
-  sceneUniformData->metalRoughFactors = glm::vec4{1, 0.5, 0, 0};
-
+  // delete the rectangle data on engine shutdown
   mainDeletionQueue.pushFunction([&]() {
     destroyBuffer(rectangle.indexBuffer);
     destroyBuffer(rectangle.vertexBuffer);
-    destroyBuffer(materialConstants);
   });
-
-  materialResources.dataBuffer = materialConstants.buffer;
-  materialResources.dataBufferOffset = 0;
-
-  defaultData = metalRoughMaterial.writeMaterial(
-      device, MaterialPass::MainColor, materialResources, globalDescriptorAllocator);
 
   // clamp vector to unsigned int range(clamp[0,1] * 255)
   // 4 means rgba(vec4), 8 means 8bit(128(unsigned int range))
@@ -966,6 +979,45 @@ void Context::initDefaultData() {
     destroyImage(blackImage);
     destroyImage(errorCheckerboardImage);
   });
+
+  GltfMetallicRoughness::MaterialResources materialResources;
+  // default material textures
+  materialResources.colorImage = whiteImage;
+  materialResources.colorSampler = defaultSamplerLinear;
+  materialResources.metalRoughImage = whiteImage;
+  materialResources.metalRoughSampler = defaultSamplerLinear;
+
+  AllocatedBuffer materialConstants = createBuffer(sizeof(GltfMetallicRoughness::MaterialConstants),
+                                                   VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                                                   VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+  auto* sceneUniformData =
+      (GltfMetallicRoughness::MaterialConstants*)materialConstants.allocation->GetMappedData();
+  sceneUniformData->colorFactors = glm::vec4{1, 1, 1, 1};
+  sceneUniformData->metalRoughFactors = glm::vec4{1, 0.5, 0, 0};
+
+  mainDeletionQueue.pushFunction([&]() { destroyBuffer(materialConstants); });
+
+  materialResources.dataBuffer = materialConstants.buffer;
+  materialResources.dataBufferOffset = 0;
+
+  defaultData = metalRoughMaterial.writeMaterial(
+      device, MaterialPass::MainColor, materialResources, globalDescriptorAllocator);
+
+  testMeshes = loadGltfMeshes(this, "assets/basicmesh.glb").value();
+
+  for (auto& m : testMeshes) {
+    std::shared_ptr<MeshNode> newNode = std::make_shared<MeshNode>();
+    newNode->mesh = m;
+    newNode->localTransform = glm::mat4{1.0f};
+    newNode->worldTransform = glm::mat4{1.0f};
+
+    for (auto& s : newNode->mesh->surfaces) {
+      s.material = std::make_shared<GltfMaterial>(defaultData);
+    }
+
+    loadedNodes[m->name] = std::move(newNode);
+  }
 }
 
 void Context::immediateSubmit(std::function<void(VkCommandBuffer cmd)>&& function) {
@@ -1265,5 +1317,48 @@ MaterialInstance GltfMetallicRoughness::writeMaterial(VkDevice device,
   writer.updateSet(device, matData.materialSet);
 
   return matData;
+}
+
+void MeshNode::draw(const glm::mat4& topMatrix, DrawContext& ctx) {
+  glm::mat4 nodeMatrix = topMatrix * worldTransform;
+
+  for (auto& s : mesh->surfaces) {
+    RenderObject def{};
+    def.indexCount = s.count;
+    def.firstIndex = s.startIndex;
+    def.indexBuffer = mesh->meshBuffers.indexBuffer.buffer;
+    def.material = &s.material->data;
+
+    def.transform = nodeMatrix;
+    def.vertexBufferAddress = mesh->meshBuffers.vertexBufferAddress;
+
+    ctx.opaqueSurfaces.push_back(def);
+  }
+
+  Node::draw(topMatrix, ctx);
+}
+
+void Context::updateScene() {
+  mainDrawContext.opaqueSurfaces.clear();
+
+  for (int x = -3; x < 3; x++) {
+    glm::mat4 scale = glm::scale(glm::vec3{0.2});
+    glm::mat4 translation = glm::translate(glm::vec3{x, 1, 0});
+
+    loadedNodes["Suzanne"]->draw(translation * scale, mainDrawContext);
+  }
+
+  sceneData.view = glm::translate(glm::vec3{0, 0, -5});
+  sceneData.proj =
+      glm::perspective(glm::radians(70.f),
+                       static_cast<float>(windowExtent.width) / static_cast<float>(windowExtent.height),
+                       10000.0f,
+                       0.1f);
+  sceneData.proj[1][1] *= -1;
+  sceneData.viewproj = sceneData.proj * sceneData.view;
+
+  sceneData.ambientColor = glm::vec4(0.1f);
+  sceneData.sunlightColor = glm::vec4(1.0f);
+  sceneData.sunlightDirection = glm::vec4(0, 1, 0.5, 1.0f);
 }
 }  // namespace vk1

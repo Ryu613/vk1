@@ -6,9 +6,15 @@
 #include <filesystem>
 
 namespace vk1 {
+
+struct GltfMaterial {
+  MaterialInstance data;
+};
+
 struct GeoSurface {
   uint32_t startIndex;
   uint32_t count;
+  std::shared_ptr<GltfMaterial> material;
 };
 
 struct MeshAsset {

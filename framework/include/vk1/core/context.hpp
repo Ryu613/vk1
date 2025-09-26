@@ -70,6 +70,15 @@ struct RenderObject {
   VkDeviceAddress vertexBufferAddress;
 };
 
+struct MeshNode : public Node {
+  std::shared_ptr<MeshAsset> mesh;
+  virtual void draw(const glm::mat4& optMatrix, DrawContext& ctx) override;
+};
+
+struct DrawContext {
+  std::vector<RenderObject> opaqueSurfaces;
+};
+
 struct GltfMetallicRoughness {
   MaterialPipeline opaquePipeline;
   MaterialPipeline transparentPipeline;
@@ -182,6 +191,11 @@ class Context {
 
   MaterialInstance defaultData;
   GltfMetallicRoughness metalRoughMaterial;
+
+  DrawContext mainDrawContext;
+  std::unordered_map<std::string, std::shared_ptr<Node>> loadedNodes;
+
+  void updateScene();
 
   inline FrameData& getCurrentFrame() {
     return frames[frameNumber % FRAME_OVERLAP];

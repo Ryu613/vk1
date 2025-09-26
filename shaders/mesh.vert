@@ -1,4 +1,4 @@
-#versions 450
+#version 450
 
 #extension GL_GOOGLE_include_directive : require
 #extension GL_EXT_buffer_reference : require
@@ -17,7 +17,7 @@ struct Vertex {
   vec4 color;
 };
 
-layout(buffer reference, std430) readonly buffer VertexBuffer {
+layout(buffer_reference, std430) readonly buffer VertexBuffer {
   Vertex vertices[];
 };
 
